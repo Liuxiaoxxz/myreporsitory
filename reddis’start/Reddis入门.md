@@ -366,3 +366,112 @@ public class JedisConnectionFactory {
 ```
 
 ##### 3.SpringDataRedis
+
+###### SpringDataRedis 的使用
+
+- 引入依赖
+
+```xml
+<!--SpringDataRedis-->
+<dependency>
+	<groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-data-redis</artifactId>
+</dependency>
+<!--common-pool-->
+<dependency>
+   <groupId>org.apache.commons</groupId>
+   <artifactId>commons-pool2</artifactId>
+</dependency>
+```
+
+- 注入RedisTemplate
+
+​	该方法存在缺陷：
+
+​	底层调用了默认的 JDK 的序列化方式，把Java对象转为字节，序列化结为"\xac\xed\x00\x05t\x00name"
+
+​	缺陷：可读性差、内存占用大，因此我们需要改变 RedisTemplate 的序列化方式
+
+```java
+@SpringBootTest
+class RedisDemoApplicationTests {
+    @Autowired
+    private RedisTemplate redisTemplate;
+    @Test
+    void contextLoads() {
+        //写入一条String数据
+        redisTemplate.opsForValue().set("name","小张");
+        //获取String数据
+        Object name = redisTemplate.opsForValue().get("name");
+        System.out.println("name = "+name);
+    }
+}
+```
+
+###### ×修改 RedisTemplate 的序列化方式
+
+```java
+@Configuration
+public class RedisConfig {
+    @Bean
+    public RedisTemplate<String,Object> redisTemplate(RedisConnectionFactory connectionFactory){
+        //创建RedisTemplate对象
+        RedisTemplate<String, Object> template = new RedisTemplate<>();
+        //设置连接工厂
+        template.setConnectionFactory(connectionFactory);
+        //创建JSON序列化工具
+        GenericJackson2JsonRedisSerializer jsonRedisSerializer = new GenericJackson2JsonRedisSerializer();
+        //设置key的序列化
+        template.setKeySerializer(RedisSerializer.string());
+        template.setHashKeySerializer(RedisSerializer.string());
+        //设置value的序列化
+        template.setValueSerializer(jsonRedisSerializer);
+        template.setHashValueSerializer(jsonRedisSerializer);
+        //返回
+        return template;
+    }
+}
+```
+
+> 经过修改后的  RedisTemplate 的序列化结果如下：
+>
+
+​	<img src="/Users/zhangliuxiao/Documents/myrepository/reddis’start/assets/RedisTemplate修改后的序列化结果.png" alt="RedisTemplate修改后的序列化结果" style="zoom:50%;" />
+
+> ​	在修改后的序列化方式中加入了class的属性，正是这个属性，在序列化与反序列化时我们更加方便，但
+> 是，该字段占用了太大的内存，因此为了节省内存，我们不会使用Json序列化器来处理value，而是统一使用
+> String序列化器，要求只能存吃String类型的key和value。存储Java对象时，采取手动完成对象的序列化与反序列化。
+
+###### 修改 RedisTemplate 的序列化方式
+
+> Spring 提供了StringRedisTemplate 类，它的 Key 和 Value的序列化方式默认就是 String 方式
+
+```java
+@SpringBootTest
+public class RedisStringTests {
+    @Autowired
+    private StringRedisTemplate stringRedisTemplate;
+    private static final ObjectMapper mapper = new ObjectMapper();
+
+    @Test
+    void testString(){
+        stringRedisTemplate.opsForValue().set("name","虎哥");
+        Object name = stringRedisTemplate.opsForValue().get("name");
+        System.out.println("name = "+name);
+    }
+
+    @Test
+    void testSaveUser() throws JsonProcessingException {
+        User user = new User("testUser", 28);
+        String json = mapper.writeValueAsString(user);
+        stringRedisTemplate.opsForValue().set("user:100",json);
+        String jsonUser= stringRedisTemplate.opsForValue().get("user:100");
+        User user1 = mapper.readValue(jsonUser,User.class);
+        System.out.println(user1);
+    }
+}
+```
+
+> ###### private static final ObjectMapper mapper = new ObjectMapper();
+>
+> 注：常用的对象转 JSON 的方法
